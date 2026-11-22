@@ -1,0 +1,77 @@
+# RECORD SLOT OVERRIDES FOR 0XB32450'S OTHER FOUR SLOTS - ONE LINE PER REQUEST,
+# ROUND-ROBIN, SO A SINGLE GAME LAUNCH SWEEPS THEM ALL. REOPEN THE EXCHANGE ONCE
+# PER ACTIVE LINE; THE SERVER LOG PRINTS `SLOTS={...}` NEXT TO `SHAPE=` SO EACH
+# READ CAN BE MATCHED TO THE VERDICT IN THE CLIENT LOG.
+#
+# FORMAT: `SLOT=VALUE` PAIRS, COMMA OR SPACE SEPARATED. THE VALUE IS PARSED AS
+# JSON, SO NUMBERS ARE BARE AND STRINGS NEED QUOTES.
+#   0=1            SLOT 0 = STATUS        (BYTE, ENUM -2..13)
+#   2=3            SLOT 2 = DOCPOLICYBITS (DWORD)
+#   3=1791180236   SLOT 3 = LASTMODIFIEDTIME (INT64)
+#   4="playerB"  SLOT 4 = LASTMODIFIEDPROFILENAME (STRING)
+#
+# WHY: THE DOCUMENT (SLOT 1) IS PROVEN TO BE ONLY AN ID -> INT64 INDEX
+# ([{"KEY":<ID>,"DATA":<INT>}]), SO THE PAYLOAD CANNOT BE THERE. THESE ARE THE
+# ONLY OTHER PLACES A RECORD CAN CARRY TEXT. AN EMPTY FILE = NO OVERRIDES.
+#
+# 2026-10-09 VERDICT TEST #0 (SLOT=1): REGISTRATION CONFIRMED (LOGIN GET,GET
+# => SLOTS=0-1), BUT INBOX STAYS EMPTY. THE DECODE ENGINE REJECTS THE SERVED
+# SHAPE, SO THE ROW NEVER BUILDS.
+#
+# TEST #0B - THE REAL FIX: DOCSHAPE (NOT DOCSLOT) SERVES THE RAW GIFT PAYLOAD.
+#   DOCSHAPE.TXT -> [%E%] => {"KEY":"%K%","DATA":"%V%"}   <- STORED BLOB AS A STRING
+#   DOCSHAPE.TXT -> [%E%] => {"KEY":"%K%","DATA":["%V%"]} <- ALTERNATE: BLOB AS A LIST
+#
+# TEST #0C - DOCUMENT IDENTITY IN SLOT 4 (RECORD-LEVEL SENDER)? TEST ONLY AFTER
+#   SHAPE FIXES ARE CONFIRMED WORKING.
+#   0=0 4="playerB"
+#
+# ===== ARMED TEST 2026-10-10 (empty-inbox diagnosis) =====
+# Mailbox OPENS now (int64-index fix worked, no more "Unable to process
+# string") but the ROW is empty. Save audit confirms 0 TriStone gift records
+# in BOTH saves; the store mailbox itself is correct. Per
+# GIFT_PROTOCOL_FALLBACK.md the inbox ROW is built from the LOGIN GET,GET
+# 5-slot record [status][document][policy][time][name]; MAP_GET's data flag
+# is RULED OUT. Slot 0 (docStatus) is 0 (the doc has no docStatus), and "0
+# may mean no mail" -> the binder skips the row but still delivers the
+# attachment (exactly the attachment-landed-but-no-row symptom we see).
+#
+# LEVER #1: force a positive mail-present status on the login record.
+# ONE active line = deterministic (doc_slot re-reads this file per request;
+# with a single active line every request serves it, no round-robin drift).
+#   status 2 = "unread" (GIFT doc primary candidate).
+# Reopen the exchange as playerA; if the row renders, status was the gate.
+# To cycle: change the number below and reopen (no relaunch needed).
+#   2  ->  1  ->  3  ->  4  ->  5  ->  -1  ->  -2   (enum -2..13)
+#
+# ===== LEVER #1 VERDICT (2026-10-10) - REVERTED: REGRESSION =====
+# 0=2 (status=2) served slots={0: 2} on BOTH the login GET,GET content route
+# AND the MAP_GET index route (doc_slot() at ds2_server.py:2043 applies to EVERY
+# record built, after the GET/MAP_GET if/elif). Result on-device: inbox ERRORED
+# and save audit shows 0 TriStone gifts in BOTH saves -> status=2 also BROKE
+# content ingestion (items landed earlier with NO override). Test #0 already
+# disproved status=1 (response good, empty row). => the status lever is a DEAD
+# END and 0=2 is a REGRESSION. Reverted below (no active override = status 0).
+
+# ===== NEXT LEVERS (2026-10-10) - record slots 3 (time) and 4 (name) =====
+# docslot.txt 05-10-10: the ONLY untested empty record slots are slot3
+# (lastModifiedDate -> 0) and slot4 (lastModifiedName -> ""). The blob carries
+# GifterName=playerB + Location + Version, but that text rendered the ITEM
+# (attachment landed); it never built a MAIL ROW. A mail row needs the sender
+# name; slot4 is the record-level "lastModifiedProfileName" and is currently "".
+#
+# ALL these keep status=0 (0=0) so content ingestion is NOT regressed (0=2 broke
+# it; 0=1 tested empty). ONE active line per test = deterministic (doc_slot
+# re-reads per request; a single active line always serves, no round-robin).
+#
+# LEVER #2 (ARMED): sender name in slot 4, status pinned 0.
+0=0 4="playerB"
+#
+# LEVER #3: non-zero lastModifiedTime in slot 3 (name still present).
+# 0=0 3=1791180236 4="playerB"
+#
+# LEVER #4: time only, name left as the store default ("").
+# 0=0 3=1791180236
+#
+# LEVER #5: docPolicyBits in slot 2 (in case a policy gate hides the row).
+# 0=0 2=3 4="playerB"

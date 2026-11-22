@@ -1,0 +1,20 @@
+{
+  "http_port": 80,
+  "https_ports": [
+    443,
+    8443
+  ],
+  "enable_tls": true,
+  "use_client_ca_cert": false,
+  "verify_client_cert": true,
+  "tunnel_poll_timeout_s": 25,
+  "default_profile_name": "Death",
+  "news": [],
+  "verify_client_cert_ports": [
+    "443"
+  ],
+  "greet_tls": true,
+  "greet_8443": false,
+  "serve_leaf_clone": 1,
+  "https_port": 443
+}

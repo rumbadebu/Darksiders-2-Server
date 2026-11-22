@@ -1,0 +1,105 @@
+# Candidate document shapes, tried ROUND-ROBIN - one per request. Reopen the
+# exchange once per active line; the server log says which it served
+# (`cloud ... shape=<spec>`) and the client log whether it was accepted
+# (`Error: Unable to process string` = rejected).
+#
+# A spec is an ENTRY template (%K% = key, %V% = value) or `DOC => ENTRY` with %E%
+# in DOC. Only %K% is mandatory - a spec may hard-code the value.
+#
+# DOCUMENT SHAPE - FROZEN BASELINE (2026-10-05).
+#
+# Audited against the client's own verdicts in ds2_tls.log, pairing every
+# `shape=` this server logged with the `CallCloudAsync - response good` /
+# `Unable to process string` that followed it (tools: tmp_shape_audit.py):
+#
+#   good=103 bad=15   {"key":"%K%","data":0}                <- int64 in `data` works
+#   good=4   bad=0    {"key":"%K%","data":1791201978}       <- timestamps also clean
+#   good=4   bad=0    {"key":"%K%","data":1791202101}
+#   good=0   bad=4    {"key":"%K%","data":{"value":"%V%"}} <- every blob shape
+#   good=0   bad=4    {"key":"%K%","data":["%V%"]}           <-   was REJECTED
+#
+# So the gift PAYLOAD is never accepted in the document: `data` must be an int64.
+# That is consistent with the exchange WORKING underneath the UI - a gift sent
+# 12554 -> 42002 lands in the RECIPIENT's local save (proved by giving each
+# account a different gift and finding each save holding the other's item).
+#
+# NEW LEAD (2026-10-05, tmp_remove_audit.py): across all 78 MAP_REMOVE requests
+# the game has ever sent, `keys` is ALWAYS the literal `key` - never a gift id -
+# and there is exactly ONE `key` PER GIFT ON SCREEN:
+#     keys=key,key,key   docKeys=TomeGift,TomeGift,TomeGift   (3 gifts)
+#     keys=key,key       docKeys=TomeGift,TomeGift             (2 gifts)
+#     keys=key           docKeys=TomeGift                       (1 gift)
+# `keys`/`values`/`docKeys` are index-aligned, so `key` is the client's own name
+# for a map entry inside TomeGift, exactly as `GameToWeb` names the entry inside
+# the GameToWeb document.
+#
+# THE SHAPE MUST THEREFORE BE ONE ENTRY PER STORED GIFT, WITH ITS REAL ID.
+# Serving a fixed-size document (`[{"key":"key","data":0}]`, or two hard-coded
+# `key` entries) is actively WRONG: the client counts the entries it was given,
+# believes that is how many gifts it has, and sends that many placeholder
+# removes - so the real gifts become unreachable. Observed 18:02:59: three gifts
+# in the store, a TWO-entry document served, and a collect for TWO gifts.
+# The client also cannot resolve a sender from an anonymous entry, and falls
+# back to the logged-in player's own name.
+#
+# ONE LINE PER READ, round-robin; reopen the exchange once per line and match
+# `shape=` in the server log. %K% = gift id, %V% = stored base64 blob,
+# %N% = 1-based entry ordinal.
+# 2026-10-06 ROUTE NOTE: only renders that a MAP_GET actually serves consume a
+# line - a plain `GET` (the login read) now returns the RAW stored document and
+# no longer advances this rotation (see `_cloud_body`'s route split).
+# 2026-10-08 RECEIVE NOTE: with DS2_GET_MAP the plain GET serves the gift
+# MAP instead of a bare value - the shape the client's base64 entry walk
+# (0xb44f96) decodes into save entries (see ds2_server.GET_MAP /
+# doc_map_json). Default: pairs [["<giftId>","Qk9E..."],...] (the alias the
+# pre-split rotation served on login reads); DS2_GET_MAP=obj keeps the
+# {"<giftId>":"Qk9E..."} object (served in-game 10-09: accepted, but no
+# save entry). This file stays MAP_GET-only either way.
+#
+# 2026-10-09 UNREAD-FLAG PIN (round_1021): the attachment from the served gift
+# already lands in the save via the login GET,GET pairs read, but the INBOX ROW
+# stayed empty. The client log shows NO error and `response good` on every step;
+# the only difference between an accepted row and an empty inbox is the `data`
+# int64 on the MAP_GET index document:
+#     MAP_GET data:1  -> inbox row present   (e.g. 21:15:54)
+#     MAP_GET data:0  -> inbox EMPTY         (e.g. 22:48:22, no error at all)
+# `data` is read as a bare int64 (docshape audit: 0 and unix timestamps both
+# parse clean; only blob/list values are rejected), so it is NOT the payload -
+# it is a per-gift status flag. Pinned to data:1 deterministically. doc_shape()
+# re-reads this file per request, so a single active line means every MAP_GET
+# serves data:1 (no restart). The data:0 controls stay below as reference.
+#
+# 2026-10-10 ROOT CAUSE (round_1022): the inbox ERROR was THIS file serving the
+# blob as a string value - `data":"%V%"`. That is a blob/value shape, and the
+# frozen audit above already proved every one is REJECTED (good=0 bad=4), and
+# GIFT_PROTOCOL_FALLBACK.md confirms MAP_GET rejects any blob with
+# `Unable to process string`. docshape.txt is the MAP_GET (inbox INDEX) route
+# (`opi != 'GET'`); the gift CONTENT (the Qk9E blob) rides the plain login
+# GET,GET route instead (doc_map_json -> getmap:pairs, the DS2_GET_MAP default),
+# which base64-decodes at 0xb4394c and ingests via onGiftReceived /
+# GiftComponent.addGift. That content route is SEPARATE and already works
+# (round_1022 02:05:52 served getmap:pairs cleanly) - do NOT put the blob here.
+#
+# THE FIX: MAP_GET serves ONLY the integer index. `data` is a bare int64
+# unread/present flag (round_1021 pin: data:1 -> inbox row present,
+# data:0 -> inbox empty), keyed by the real gift id. This is the ONLY body the
+# client's map parser (0xb08b07) accepts, and it renders the inbox row.
+#
+# 2026-10-11 19:43 - PROBE-VERIFIED WALK MECHANICS (the receive path, observed):
+# the walk decodes each entry member's VALUE (base64) and stores
+# {member-name: decoded-value} on the gift object. With the index above it
+# stores {"key": <15-byte decoded giftId>} - meaningless, inbox empty.
+# THE GIFT PAYLOAD IS THE VALUE: serve {giftId: base64 blob} so the walk decodes
+# the BLOB -> the BOD binary (the real gift: GifterName + items) and stores it
+# under the NUMERIC gift id. A numeric key also avoids the 0x96d5c comparator AV
+# (the old crash: pair key "key" is non-numeric -> garbage deref).
+#
+# 2026-10-11 19:58 - `[{"giftId":"blob"}]` was REJECTED by the parser
+# ("Error: Unable to process string" - the walk never fired, no probe lines).
+# But {"key":"<blob>","data":1} PARSED fine (the walk ran, decoded the blob,
+# then crashed at the comparator) - so LONG VALUES ARE NOT the problem; the
+# schema wants the two members. NEXT A/B (below): keep "data", make the first
+# member the giftId. If the member set is positional, the store gets
+# {giftId: BOD} = the real gift. If it errors, names are matched ("key"
+# required) and the store key cannot be the gift id via this path.
+[%E%] => {"%K%":"%V%","data":1}

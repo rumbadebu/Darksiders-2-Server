@@ -1,0 +1,21 @@
+# --- Runtime logs (large; regenerate on run) ---
+server/logs/
+*.log
+round_*_stdout.txt
+round_*_stderr.txt
+round_*_err.txt
+
+# --- Runtime cloud store (recreated on first login; contains private player data) ---
+server/data/cloud/
+
+# --- Test-data snapshots ---
+server/data/cloud_backup_*/
+
+# --- Python ---
+__pycache__/
+*.pyc
+
+# --- Local scratch ---
+tmp_*
+*.pcap
+
