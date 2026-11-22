@@ -1,6 +1,6 @@
 # Darksiders 2 — Local Server Revival
 
-Private server emulator for **Darksiders 2 (PC, Steam, appid 50650)** that brings back the online features lost when THQ shut down the "THQ Connect" (`thqconnect.com`) servers.
+AI generated Private server emulator for **Darksiders 2 (PC, Steam, appid 50650)** that brings back the online features lost when THQ shut down the "THQ Connect" (`thqconnect.com`) servers.
 
 The project re-implements THQ Connect locally so the Steam game's online features work again — most importantly the **cloud document store** that powers player-to-player **item/gift exchange**.
 
@@ -102,6 +102,7 @@ python -m pip install cryptography
 ```
 
 ### Step 3 — Mint certificates and patch the game (run once)
+Copy original game exe to Client\debug\ and rename it Darksiders2.exe.original
 
 Run the patching batch file **as Administrator**:
 
